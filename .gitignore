@@ -1,2 +1,4 @@
 website
 .ipynb_checkpoints/
+.idea/
+log.txt

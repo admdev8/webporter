@@ -23,6 +23,7 @@ Welcome = """
 WebPorter now!
 """
 
+
 class Log(object):
 
     def __init__(self, level=logging.NOTSET):
@@ -45,6 +46,7 @@ class Log(object):
 
 log = Log()
 loge = Log(logging.ERROR)
+
 processed_pages = {}
 
 urllib3.disable_warnings()
@@ -73,8 +75,10 @@ def parse_args():
     parser.add_argument("-d", "--depth", help="Number of loops to get links")
     parser.add_argument("-t", "--threads", help="Number of threads for task execution")
     parser.add_argument("-e", "--entire", help="Download entire website", action="store_true")
-    parser.add_argument("--log_path", help="Log path")
     parser.add_argument("-l", "--log_level", help="Log level")
+    parser.add_argument("-x", "--exclude", help="exclude pages")
+    parser.add_argument("--log_path", help="Log path")
+
     return parser.parse_args()
 
 
@@ -244,12 +248,12 @@ def ProcessResourcePath(pages_url, source_url):
 
         # process relative path
         if if_abslote_url:
-            tmp_fsubffix=GetUrlPart(source_download_url, "filesuffix")
+            tmp_fsubffix = GetUrlPart(source_download_url, "filesuffix")
             temp_source_name = Md5Encrypt(source_url) + tmp_fsubffix
             processed_source_url = relative_path + "site_resource/" + temp_source_name
             source_save_path = "site_resource/" + temp_source_name
         elif if_special_url:
-            loge("ignore special url %s, %s" %(source_url, source_download_url))
+            loge("ignore special url %s, %s" % (source_url, source_download_url))
             pass
         elif source_url.startswith("./"):
             log("handle source 6 url %s" % source_url)
@@ -364,6 +368,27 @@ def ProcessLink(page_url, link, if_page_url=False):
     return processed_link
 
 
+class FilterPages(object):
+
+    def __init__(self, exclude_pages=[]):
+        self.ex_pages = [page.lower() for page in exclude_pages]
+        self.filtered_pages = []
+
+    def __call__(self, page):
+        return self.filter_pages(page)
+
+    def filter_pages(self, page):
+        if page in self.filtered_pages:
+            return False
+
+        decoded_page = urllib.parse.unquote(page)
+        for ex_page in self.ex_pages:
+            if ex_page in decoded_page:
+                loge("filter ignore %s" % page)
+                self.filtered_pages.append(page)
+                return False
+
+
 def CrawlSinglePage(page_url):
     sleep_time = 2 + 2 * random.random()
     time.sleep(sleep_time)
@@ -403,10 +428,9 @@ def CrawlSinglePage(page_url):
         source_save_path = "website/" + domain_path + "/" + link_info["source_save_path"]
         source_save_path.replace("\\\\", "")
         if os.path.exists(source_save_path):
-            #check file size and web page header size
+            # check file size and web page header size
             continue
         source_raw = ExtractContent(link_info["source_download_url"])
-        # log(source_save_path)
         if source_raw is None:
             continue
         SaveFile(source_raw, source_save_path, True)
@@ -434,8 +458,10 @@ def CrawlSinglePage(page_url):
 
 def CollectUrls(page_url):
     filename_black_names = [":", "?", "'", '"', "<", ">", "|"]
-    #black_suffix_str = ".tgz|.jar|.so|.docx|.py|.js|.css|.jpg|.jpeg|.png|.gif|.bmp|.pic|.tif|.txt|.doc|.hlp|.wps|.rtf|.pdf|.rar|.zip|.gz|.arj|.z|.wav|.aif|.au|.mp3|.ram|.wma|.mmf|.amr|.aac|.flac|.avi|.mpg|.mov|.swf|.int|.sys|.dll|.adt|.exe|.com|.c|.asm|.for|.lib|.lst|.msg|.obj|.pas|.wki|.bas|.map|.bak|.tmp|.dot|.bat|.cmd|.com"
-    black_suffix_str = ".so|.js|.css"
+    # black_suffix_str = ".tgz|.jar|.so|.docx|.py|.js|.css|.jpg|.jpeg|.png|.gif|.bmp|.pic|.tif|.txt|.doc|.hlp|.wps
+    # |.rtf|.pdf|.rar|.zip|.gz|.arj|.z|.wav|.aif|.au|.mp3|.ram|.wma|.mmf|.amr|.aac|.flac|.avi|.mpg|.mov|.swf|.int
+    # |.sys|.dll|.adt|.exe|.com|.c|.asm|.for|.lib|.lst|.msg|.obj|.pas|.wki|.bas|.map|.bak|.tmp|.dot|.bat|.cmd|.com"
+    black_suffix_str = ".so|.js|.css|.zip|.gz"
     black_suffix = black_suffix_str.split("|")
     links_a = ExtractLinks(page_url, "a", "href")
     result = []
@@ -473,7 +499,8 @@ def coroutine_init(function, parameters, threads):
     use coroutine_execution to invoke coroutine
     """
     times = int(len(parameters) / threads) + 1
-    if len(parameters) == threads or int(len(parameters) % threads) == 0: times -= 1
+    if len(parameters) == threads or int(len(parameters) % threads) == 0:
+        times -= 1
     result = []
     for num in range(times):
         tasks = []
@@ -486,18 +513,16 @@ def coroutine_init(function, parameters, threads):
             Minimum = 0
             Maximum = len(parameters)
         for i in range(Minimum, Maximum):
-            # you can adjust the count from parameters[i], single value at present.
             future = asyncio.ensure_future(coroutine_execution(function, param1=parameters[i]))
             tasks.append(future)
         loop = asyncio.get_event_loop()
         loop.run_until_complete(asyncio.wait(tasks))
         for task in tasks:
             result.append(task.result())
-        # log("[*] The {}th thread ends".format(str(num + 1)))
     return result
 
 
-def ExtractUrls(main_url, depth=20, threads=10):
+def ExtractUrls(main_url, depth=20, threads=10, page_filter=None):
     log("Main url: {url} Depth: {depth} Threads:{threads}".format(url=main_url, depth=depth, threads=threads))
     domain = GetUrlPart(main_url, "domain")
     domain_path = domain.replace(".", "_")
@@ -520,18 +545,20 @@ def ExtractUrls(main_url, depth=20, threads=10):
         for result in results:
             for temp_url in result:
                 if temp_url not in urls:
-                    urls.append(temp_url.strip())
+                    if page_filter(temp_url):
+                        urls.append(temp_url.strip())
         log("Collected {0} URL links in this cycle".format(len(urls) - urls_count))
         urls_count = len(urls)
     log("Urls collection completed")
     log("Collected a total of {0} URLs".format(str(urls_count)))
     log("Getting source and resources for each page...")
-    results = coroutine_init(CrawlSinglePage, parameters=urls, threads=threads)
+    return urls
 
 
 def main():
     global log
     log(Welcome)
+    exclude_pages = []
     args = parse_args()
     if args.cookie is not None:
         header["cookie"] = args.cookie
@@ -540,12 +567,30 @@ def main():
         log = init_log(args.log_path, args.log_level)
         log("save log into %s" % args.log_path)
 
+    filter_page = FilterPages()
+    if args.exclude is not None:
+        if isinstance(args.exclude, list):
+            exclude_pages = args.exclude
+        elif os.path.exists(args.exclude):
+            with open(args.exclude, encoding="utf8") as ex_read:
+                while True:
+                    ex_pag = ex_read.readline()
+                    if ex_pag:
+                        exclude_pages.append(ex_pag.lower())
+                    else:
+                        break
+        else:
+            pass
+        filter_page = FilterPages(exclude_pages)
+        log("exclude pages: %s" % str(exclude_pages))
+
     urls = []
     if args.urls is not None:
         with open(args.urls, "r", encoding="utf-8") as fobject:
             urls = fobject.read().split("\n")
     elif args.url is not None:
         urls.append(args.url)
+
     for crawl_url in urls:
         if args.entire:
             depth = 20
@@ -555,7 +600,8 @@ def main():
             if args.threads is not None:
                 threads = int(args.threads)
             log("save the whole index page %s" % crawl_url)
-            ExtractUrls(crawl_url, depth, threads)
+            extra_urls = ExtractUrls(crawl_url, depth, threads, filter_page)
+            results = coroutine_init(CrawlSinglePage, parameters=extra_urls, threads=threads)
         elif not args.entire:
             log("save the single page %s" % crawl_url)
             CrawlSinglePage(crawl_url)
